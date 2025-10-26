@@ -1,7 +1,8 @@
 import fetch from "node-fetch";
 import fs from "fs";
-import dotenv from "dotenv";
 import express from "express";
+import dotenv from "dotenv";
+
 dotenv.config();
 
 const app = express();
@@ -16,7 +17,7 @@ let accessToken = "";
 let lastScores = {};
 let firstRun = true;
 
-// Load last saved scores
+// Load saved data
 if (fs.existsSync(LAST_FILE)) {
   lastScores = JSON.parse(fs.readFileSync(LAST_FILE, "utf8"));
 }
@@ -25,7 +26,6 @@ function log(...args) {
   console.log(`[${new Date().toISOString()}]`, ...args);
 }
 
-// === AUTH ===
 async function getToken() {
   const res = await fetch("https://osu.ppy.sh/oauth/token", {
     method: "POST",
@@ -34,85 +34,90 @@ async function getToken() {
       client_id: OSU_CLIENT_ID,
       client_secret: OSU_CLIENT_SECRET,
       grant_type: "client_credentials",
-      scope: "public"
-    })
+      scope: "public",
+    }),
   });
+
   const data = await res.json();
   accessToken = data.access_token;
   log("🔑 Token refreshed");
 }
 
-// === FETCH ALGERIAN TOP PLAYERS ===
-async function getAlgerianTopPlayers() {
+async function getRecentRankedBeatmaps() {
   const res = await fetch(
-    "https://osu.ppy.sh/api/v2/rankings/osu/performance?country=DZ&cursor=&limit=50",
+    "https://osu.ppy.sh/api/v2/beatmapsets/search?mode=osu&sort=ranked_desc&limit=50",
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
   const data = await res.json();
-  return data.ranking || [];
+  return data.beatmapsets
+    .flatMap(set => set.beatmaps)
+    .filter(b => b.status === "ranked");
 }
 
-// === FETCH USER'S TOP PLAY ===
-async function getUserBestPlay(userId) {
-  const res = await fetch(`https://osu.ppy.sh/api/v2/users/${userId}/scores/best?limit=1`, {
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
+async function getTop1ForBeatmap(beatmapId) {
+  const res = await fetch(
+    `https://osu.ppy.sh/api/v2/beatmaps/${beatmapId}/scores?country=DZ`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
   const data = await res.json();
-  return data[0]; // top 1 play
+  return data.scores?.[0];
 }
 
-// === SEND DISCORD NOTIFICATION ===
-async function notifyDiscord(user, beatmap) {
+async function sendDiscordNotification(beatmap, top1) {
   const embed = {
-    username: "osu! Algeria Top1 Notifier",
-    embeds: [
+    title: `🇩🇿 New #1 on ${beatmap.version}`,
+    url: `https://osu.ppy.sh/b/${beatmap.id}`,
+    color: 0x1abc9c,
+    author: {
+      name: top1.user.username,
+      url: `https://osu.ppy.sh/users/${top1.user.id}`,
+      icon_url: top1.user.avatar_url,
+    },
+    thumbnail: { url: beatmap.beatmapset.covers.card },
+    fields: [
       {
-        title: `${user.username} just achieved #1 in Algeria! 🇩🇿`,
-        description: `[${beatmap.beatmapset.title} [${beatmap.beatmap.version}]](https://osu.ppy.sh/beatmaps/${beatmap.beatmap.id})`,
-        thumbnail: { url: beatmap.beatmapset.covers.card },
-        fields: [
-          { name: "PP", value: `${Math.round(beatmap.pp)}pp`, inline: true },
-          { name: "Accuracy", value: `${(beatmap.accuracy * 100).toFixed(2)}%`, inline: true },
-        ],
-        color: 0xff66aa,
-      }
-    ]
+        name: "Beatmap",
+        value: `${beatmap.beatmapset.artist} - ${beatmap.beatmapset.title}`,
+      },
+      { name: "Score", value: top1.score.toLocaleString(), inline: true },
+      { name: "PP", value: `${Math.round(top1.pp)}pp`, inline: true },
+      { name: "Accuracy", value: `${(top1.accuracy * 100).toFixed(2)}%`, inline: true },
+    ],
+    timestamp: new Date(),
   };
 
   await fetch(DISCORD_WEBHOOK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(embed)
+    body: JSON.stringify({ embeds: [embed] }),
   });
 
-  log(`🎉 Sent Discord notification for ${user.username}`);
+  log(`🎉 Sent Discord notification for ${top1.user.username} on ${beatmap.id}`);
 }
 
-// === MAIN CHECK FUNCTION ===
 async function checkNewTop1s() {
-  const players = await getAlgerianTopPlayers();
+  const beatmaps = await getRecentRankedBeatmaps();
 
-  if (firstRun) {
-    log("Skipping notifications on first run to avoid spam...");
-    firstRun = false;
-    lastScores = players.map(p => p.user.id);
-    fs.writeFileSync(LAST_FILE, JSON.stringify(lastScores, null, 2));
-    return;
-  }
+  for (const beatmap of beatmaps) {
+    const top1 = await getTop1ForBeatmap(beatmap.id);
+    if (!top1) continue;
 
-  for (const player of players) {
-    if (!lastScores.includes(player.user.id)) {
-      const beatmap = await getUserBestPlay(player.user.id);
-      if (beatmap) await notifyDiscord(player.user, beatmap);
+    const previous = lastScores[beatmap.id];
+    if (previous && previous.user_id === top1.user.id) continue;
+
+    if (!firstRun && previous && previous.user_id !== top1.user.id) {
+      await sendDiscordNotification(beatmap, top1);
     }
+
+    lastScores[beatmap.id] = { user_id: top1.user.id, username: top1.user.username };
   }
 
-  lastScores = players.map(p => p.user.id);
   fs.writeFileSync(LAST_FILE, JSON.stringify(lastScores, null, 2));
+  firstRun = false;
   log("✅ Check completed successfully");
 }
 
-// === EXPRESS ENDPOINT ===
+// Route for cron-job.org
 app.get("/run-check", async (req, res) => {
   try {
     log("⏱️ Cron triggered - checking new top 1s...");
