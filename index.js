@@ -40,12 +40,15 @@ async function getAlgerianTopPlayers() {
 }
 
 async function notifyDiscord(player, beatmap) {
+  const pp = player.pp ? player.pp.toFixed(2) : "N/A";
+  const rank = player.global_rank ? `#${player.global_rank}` : "Unknown";
+
   const embed = {
     title: `🇩🇿 ${player.username} got #1!`,
     description: `[${beatmap.title} [${beatmap.version}]](${beatmap.url})`,
     thumbnail: { url: beatmap.cover_url },
     color: 0x00ff88,
-    footer: { text: `PP: ${player.pp.toFixed(2)} | Rank: #${player.global_rank}` }
+    footer: { text: `PP: ${pp} | Rank: ${rank}` }
   };
 
   await fetch(DISCORD_WEBHOOK_URL, {
