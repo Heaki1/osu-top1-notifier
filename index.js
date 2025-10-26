@@ -45,8 +45,6 @@ const res = await fetch("https://osu.ppy.sh/api/v2/beatmapsets/search?mode=osu&s
   headers: { Authorization: `Bearer ${accessToken}` }
 });
 
-import express from "express";
-const app = express();
 
 app.get("/run-check", async (req, res) => {
   try {
