@@ -1,6 +1,8 @@
 import fetch from "node-fetch";
 import fs from "fs";
 import dotenv from "dotenv";
+import express from "express";
+
 dotenv.config();
 
 const OSU_CLIENT_ID = process.env.OSU_CLIENT_ID;
@@ -9,9 +11,8 @@ const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 const LAST_FILE = "./lastScores.json";
 
 let accessToken = "";
-let lastScores = []:
+let lastScores = [];
 let firstRun = true;
-
 
 // Load lastScores from file
 if (fs.existsSync(LAST_FILE)) {
@@ -41,6 +42,17 @@ async function getAlgerianTopPlayers() {
   return data.ranking || [];
 }
 
+async function getUserBestPlay(userId) {
+  const res = await fetch(`https://osu.ppy.sh/api/v2/users/${userId}/scores/best?limit=1`, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  const data = await res.json();
+  if (!data[0]) return null;
+
+  return data[0]; // the top #1 score
+}
+
 async function notifyDiscord(player, beatmap) {
   const pp = player.pp ? player.pp.toFixed(2) : "N/A";
   const rank = player.global_rank ? `#${player.global_rank}` : "Unknown";
@@ -53,28 +65,13 @@ async function notifyDiscord(player, beatmap) {
     footer: { text: `PP: ${pp} | Rank: ${rank}` },
   };
 
-  await fetch(DISCORD_WEBHOOK, {
+  await fetch(DISCORD_WEBHOOK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ embeds: [embed] }),
   });
 
   console.log(`✅ Notified for ${player.username} (${beatmap.beatmapset.title})`);
-}
-
-async function getUserBestPlay(userId) {
-  const res = await fetch(`https://osu.ppy.sh/api/v2/users/${userId}/scores/best?limit=1`, {
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
-  const [score] = await res.json();
-  if (!score) return null;
-
-  return {
-    title: score.beatmapset.title,
-    version: score.beatmap.version,
-    url: `https://osu.ppy.sh/beatmaps/${score.beatmap.id}`,
-    cover_url: score.beatmapset.covers.card
-  };
 }
 
 async function checkNewTop1s() {
@@ -84,6 +81,7 @@ async function checkNewTop1s() {
     console.log("Skipping notifications on first run to avoid spam...");
     firstRun = false;
     lastScores = players.map(p => p.user.id);
+    fs.writeFileSync(LAST_FILE, JSON.stringify(lastScores, null, 2));
     return;
   }
 
@@ -95,12 +93,34 @@ async function checkNewTop1s() {
   }
 
   lastScores = players.map(p => p.user.id);
+  fs.writeFileSync(LAST_FILE, JSON.stringify(lastScores, null, 2));
 }
 
+// ================================
+// Express app (for cron-job.org)
+// ================================
+const app = express();
 
-// Main loop
+app.get("/run-check", async (req, res) => {
+  try {
+    console.log("⏱️ Cron triggered - checking new top 1s...");
+    await getToken();
+    await checkNewTop1s();
+    res.send("✅ osu! Top1 check completed");
+  } catch (err) {
+    console.error("❌ Cron error:", err);
+    res.status(500).send("Error during check");
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`✅ Listening for cron pings on port ${PORT}`));
+
+// ================================
+// Auto-run loop (every 10 minutes)
+// ================================
 (async () => {
-  console.log("Starting osu! Algeria Top1 Notifier...");
+  console.log("🚀 Starting osu! Algeria Top1 Notifier...");
   await getToken();
   await checkNewTop1s();
 
