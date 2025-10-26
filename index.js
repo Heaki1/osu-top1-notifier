@@ -35,6 +35,7 @@ async function getToken() {
       grant_type: "client_credentials",
       scope: "public"
     })
+
   });
   const data = await res.json();
   accessToken = data.access_token;
@@ -43,3 +44,21 @@ async function getToken() {
 const res = await fetch("https://osu.ppy.sh/api/v2/beatmapsets/search?mode=osu&sort=ranked_desc&limit=20", {
   headers: { Authorization: `Bearer ${accessToken}` }
 });
+
+import express from "express";
+const app = express();
+
+app.get("/run-check", async (req, res) => {
+  try {
+    console.log("⏱️ Cron triggered - checking new top 1s...");
+    await getToken();
+    await checkNewTop1s();
+    res.send("✅ osu! Top1 check completed");
+  } catch (err) {
+    console.error("❌ Cron error:", err);
+    res.status(500).send("Error during check");
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`✅ Listening for cron pings on port ${PORT}`));
