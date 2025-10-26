@@ -9,7 +9,9 @@ const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 const LAST_FILE = "./lastScores.json";
 
 let accessToken = "";
-let lastScores = [];
+let lastScores = []:
+let firstRun = true;
+
 
 // Load lastScores from file
 if (fs.existsSync(LAST_FILE)) {
@@ -44,20 +46,20 @@ async function notifyDiscord(player, beatmap) {
   const rank = player.global_rank ? `#${player.global_rank}` : "Unknown";
 
   const embed = {
-    title: `🇩🇿 ${player.username} got #1!`,
-    description: `[${beatmap.title} [${beatmap.version}]](${beatmap.url})`,
-    thumbnail: { url: beatmap.cover_url },
-    color: 0x00ff88,
-    footer: { text: `PP: ${pp} | Rank: ${rank}` }
+    title: `${player.username} got #1 on ${beatmap.beatmapset.title} [${beatmap.version}]!`,
+    url: `https://osu.ppy.sh/b/${beatmap.id}`,
+    color: 0xff66aa,
+    thumbnail: { url: beatmap.beatmapset.covers.cover },
+    footer: { text: `PP: ${pp} | Rank: ${rank}` },
   };
 
-  await fetch(DISCORD_WEBHOOK_URL, {
+  await fetch(DISCORD_WEBHOOK, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ embeds: [embed] })
+    body: JSON.stringify({ embeds: [embed] }),
   });
 
-  console.log(`✅ Sent notification for ${player.username}`);
+  console.log(`✅ Notified for ${player.username} (${beatmap.beatmapset.title})`);
 }
 
 async function getUserBestPlay(userId) {
@@ -78,6 +80,13 @@ async function getUserBestPlay(userId) {
 async function checkNewTop1s() {
   const players = await getAlgerianTopPlayers();
 
+  if (firstRun) {
+    console.log("Skipping notifications on first run to avoid spam...");
+    firstRun = false;
+    lastScores = players.map(p => p.user.id);
+    return;
+  }
+
   for (const player of players) {
     if (!lastScores.includes(player.user.id)) {
       const beatmap = await getUserBestPlay(player.user.id);
@@ -86,8 +95,8 @@ async function checkNewTop1s() {
   }
 
   lastScores = players.map(p => p.user.id);
-  fs.writeFileSync(LAST_FILE, JSON.stringify(lastScores, null, 2));
 }
+
 
 // Main loop
 (async () => {
