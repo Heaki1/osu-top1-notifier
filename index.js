@@ -58,13 +58,23 @@ async function getRecentRankedBeatmaps(limit = 50) {
 }
 
 // Get Algerian #1 for a beatmap
-async function getAlgerianTop1(beatmapId) {
-  const res = await fetch(`https://osu.ppy.sh/api/v2/beatmaps/${beatmapId}/scores?type=country&mode=osu&country=DZ`, {
+async function getAlgerianTop1() {
+  const url = "https://osu.ppy.sh/api/v2/rankings/osu/performance?country=DZ";
+
+  const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` }
   });
+
+  if (!res.ok) {
+    const text = await res.text();
+    log(`❌ osu! API error ${res.status}:`, text.slice(0, 200));
+    throw new Error(`osu! API returned ${res.status}`);
+  }
+
   const data = await res.json();
-  return data.scores?.[0]; // top score
+  return data.ranking || [];
 }
+
 
 // Send Discord notification
 async function notifyDiscord(player, beatmap) {
