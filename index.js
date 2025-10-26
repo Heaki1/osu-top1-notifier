@@ -40,5 +40,6 @@ async function getToken() {
   accessToken = data.access_token;
 }
 
-async function getRecentRankedBeatmaps() {
-  const res = await fetch("https://osu.ppy.sh/api/v2/beatmapsets/search?mode=osu&sort=ranked_de_
+const res = await fetch("https://osu.ppy.sh/api/v2/beatmapsets/search?mode=osu&sort=ranked_desc&limit=20", {
+  headers: { Authorization: `Bearer ${accessToken}` }
+});
